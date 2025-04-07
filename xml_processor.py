@@ -4,6 +4,7 @@ import pandas as pd
 import shutil
 import tempfile
 from logger import logger
+from datetime import datetime
 
 class XMLProcessor:
     def __init__(self):
@@ -11,107 +12,43 @@ class XMLProcessor:
         
     def load_reference_data(self, xlsx_file):
         """Load reference data from XLSX file"""
-        reference_data = {}
+        logger.debug(f"Reading XLSX file: {xlsx_file}")
         
         try:
-            # Read the Excel file
-            logger.debug(f"Reading XLSX file: {xlsx_file}")
+            # Use pandas to read the Excel file
             df = pd.read_excel(xlsx_file)
             
-            # Log the columns found in the file for debugging
-            logger.debug(f"Columns found in {xlsx_file}: {list(df.columns)}")
+            # Process the data
+            self.reference_data = {}
             
-            # Try different approaches to find the right columns
-            expression_col = None
-            date_col = None
-            
-            # First try exact column names
-            expression_candidates = ['Expression', 'expression']
-            date_candidates = ['SrcDate', 'srcdate', 'Date', 'date']
-            
-            # Check for exact matches first
-            for col in expression_candidates:
-                if col in df.columns:
-                    expression_col = col
-                    logger.debug(f"Found exact match for expression column: {col}")
-                    break
-                    
-            for col in date_candidates:
-                if col in df.columns:
-                    date_col = col
-                    logger.debug(f"Found exact match for date column: {col}")
-                    break
-            
-            # If not found, try partial matching
-            if not expression_col:
-                for col in df.columns:
-                    if 'express' in str(col).lower() or 'work' in str(col).lower():
-                        expression_col = col
-                        logger.debug(f"Found partial match for expression column: {col}")
-                        break
-            
-            if not date_col:
-                for col in df.columns:
-                    if 'date' in str(col).lower() or 'src' in str(col).lower():
-                        date_col = col
-                        logger.debug(f"Found partial match for date column: {col}")
-                        break
-            
-            # If still not found, try using column H (which might be SrcDate)
-            if not date_col and len(df.columns) > 7:
-                date_col = df.columns[7]  # Column H (0-indexed)
-                logger.debug(f"Using column H as date column: {date_col}")
-            
-            # If still not found, try using column G (which might be Expression)
-            if not expression_col and len(df.columns) > 6:
-                expression_col = df.columns[6]  # Column G (0-indexed)
-                logger.debug(f"Using column G as expression column: {expression_col}")
-            
-            if not expression_col or not date_col:
-                logger.warning(f"XLSX file {xlsx_file} missing required columns. Found: {list(df.columns)}")
-                return reference_data
-            
-            logger.info(f"Using columns: Expression={expression_col}, Date={date_col}")
+            # Validate required columns
+            required_columns = ['expression', 'attribute', 'new_value']
+            if not all(col in df.columns for col in required_columns):
+                logger.error(f"XLSX file missing required columns. Required: {required_columns}")
+                return False
             
             # Process each row
-            for idx, row in df.iterrows():
-                # Skip rows with missing data
-                if pd.isna(row.get(expression_col)) or pd.isna(row.get(date_col)):
+            for _, row in df.iterrows():
+                expression = str(row['expression']).strip()
+                attribute = str(row['attribute']).strip()
+                new_value = str(row['new_value']).strip()
+                
+                # Skip rows with empty values
+                if not expression or not attribute or pd.isna(new_value):
                     continue
-                
-                expression = str(row[expression_col]).strip()
-                src_date = row[date_col]
-                
-                # Convert date to string format if it's a datetime
-                if isinstance(src_date, pd.Timestamp):
-                    src_date = src_date.strftime('%Y-%m-%d')
-                elif isinstance(src_date, str):
-                    # Try to parse and standardize date format if it's a string
-                    try:
-                        src_date = pd.to_datetime(src_date).strftime('%Y-%m-%d')
-                    except:
-                        # If parsing fails, use as is
-                        pass
-                elif isinstance(src_date, (int, float)):
-                    # Handle numeric dates (Excel sometimes stores dates as numbers)
-                    try:
-                        # Convert Excel date number to datetime
-                        src_date = pd.to_datetime('1899-12-30') + pd.Timedelta(days=int(src_date))
-                        src_date = src_date.strftime('%Y-%m-%d')
-                    except:
-                        # If conversion fails, convert to string
-                        src_date = str(src_date)
-                
+                    
                 # Add to reference data
-                reference_data[expression] = src_date
-                logger.debug(f"Added reference data: {expression} -> {src_date}")
+                if expression not in self.reference_data:
+                    self.reference_data[expression] = {}
+                
+                self.reference_data[expression][attribute] = new_value
+            
+            logger.info(f"Total reference data entries loaded: {len(self.reference_data)}")
+            return len(self.reference_data) > 0
             
         except Exception as e:
             logger.error(f"Error loading XLSX file {xlsx_file}: {str(e)}", exc_info=True)
-        
-        logger.info(f"Total reference data entries loaded: {len(reference_data)}")
-        self.reference_data = reference_data
-        return reference_data
+            raise
     
     def process_xml_file(self, xml_file, output_dir):
         """Process a single XML file"""
@@ -176,7 +113,7 @@ class XMLProcessor:
         os.makedirs(log_dir, exist_ok=True)
         
         # Create a log file for this processing session
-        log_file = os.path.join(log_dir, f"changes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+        log_file = os.path.join(log_dir, f"processing_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
         
         try:
             with open(log_file, 'w') as f:

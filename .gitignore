@@ -1,0 +1,14 @@
+/logs/*
+/logs/
+/logs/processing_log_*.txt
+/logs/processing_log_*.log
+/logs/processing_log_*.log
+/logs/processing_log_*.log
+/logs/processing_log_*.log
+
+/backups/*
+/backups/
+/backups/backup_*.zip
+/backups/backup_*.zip
+/backups/backup_*.zip
+/backups/backup_*.zip

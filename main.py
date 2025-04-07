@@ -11,6 +11,7 @@ import glob
 from logger import logger
 from xml_processor import XMLProcessor
 from preview_window import PreviewWindow
+import threading
 
 class XMLProcessorApp:
     def __init__(self, root):
@@ -36,7 +37,7 @@ class XMLProcessorApp:
         # XML status label
         self.xml_status_var = tk.StringVar()
         self.xml_status_var.set("")
-        self.xml_status_label = ttk.Label(main_frame, textvariable=self.xml_status_var, font=("Arial", 8), foreground="blue")
+        self.xml_status_label = ttk.Label(main_frame, textvariable=self.xml_status_var, font=("Arial", 8), foreground="black")
         self.xml_status_label.grid(row=2, column=0, sticky=tk.W)
         
         # XLSX file input
@@ -64,7 +65,7 @@ class XMLProcessorApp:
         # Output status label
         self.output_status_var = tk.StringVar()
         self.output_status_var.set("")
-        self.output_status_label = ttk.Label(main_frame, textvariable=self.output_status_var, font=("Arial", 8), foreground="blue")
+        self.output_status_label = ttk.Label(main_frame, textvariable=self.output_status_var, font=("Arial", 8), foreground="black")
         self.output_status_label.grid(row=8, column=0, sticky=tk.W)
         
         # Process button
@@ -97,11 +98,47 @@ class XMLProcessorApp:
             logger.info(f"XML directory selected: {directory}")
     
     def browse_xlsx_file(self):
-        file_path = filedialog.askopenfilename(title="Select XLSX Reference File", 
-                                              filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")])
-        if file_path:
-            self.xlsx_path_var.set(file_path)
-            logger.info(f"XLSX file selected: {file_path}")
+        """Browse for XLSX file"""
+        xlsx_file = filedialog.askopenfilename(
+            title="Select XLSX File",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")]
+        )
+        if xlsx_file:
+            self.xlsx_path_var.set(xlsx_file)
+            self.xlsx_status_var.set("Loading Excel data...")
+            self.xlsx_status_label.configure(foreground="blue")
+            
+            # Show loading indicator
+            self.show_progress_indicator(True)
+            
+            # Start loading in a separate thread
+            loading_thread = threading.Thread(target=self._load_xlsx_thread, args=(xlsx_file,))
+            loading_thread.daemon = True
+            loading_thread.start()
+            
+            logger.info(f"XLSX file selected: {xlsx_file}")
+
+    def _load_xlsx_thread(self, xlsx_file):
+        """Load XLSX file in a background thread"""
+        try:
+            # Load reference data from XLSX file
+            success = self.processor.load_reference_data(xlsx_file)
+            
+            if success:
+                self.root.after(0, lambda: self.xlsx_status_var.set("Excel data loaded successfully"))
+                self.root.after(0, lambda: self.xlsx_status_label.configure(foreground="green"))
+                logger.info(f"Successfully loaded XLSX file: {xlsx_file}")
+            else:
+                self.root.after(0, lambda: self.xlsx_status_var.set("No valid data found in Excel file"))
+                self.root.after(0, lambda: self.xlsx_status_label.configure(foreground="red"))
+                logger.warning(f"No valid data found in XLSX file: {xlsx_file}")
+        except Exception as e:
+            error_msg = str(e)
+            self.root.after(0, lambda: self.xlsx_status_var.set(f"Error: {error_msg[:50]}..."))
+            self.root.after(0, lambda: self.xlsx_status_label.configure(foreground="red"))
+            logger.error(f"Error loading XLSX file {xlsx_file}: {error_msg}", exc_info=True)
+        finally:
+            self.root.after(0, lambda: self.show_progress_indicator(False))
     
     def browse_output_dir(self):
         directory = filedialog.askdirectory(title="Select Output Directory")
@@ -131,6 +168,7 @@ class XMLProcessorApp:
                 self.xml_status_label.configure(foreground="red")
         else:
             self.xml_status_var.set("")
+            self.xml_status_label.configure(foreground="black")
         
         # Verify XLSX file
         if self.xlsx_path_var.get():
@@ -163,6 +201,7 @@ class XMLProcessorApp:
                 self.output_status_label.configure(foreground="red")
         else:
             self.output_status_var.set("")
+            self.output_status_label.configure(foreground="black")
     
     def process_files(self):
         # Validate inputs
@@ -178,46 +217,95 @@ class XMLProcessorApp:
             self.status_var.set("Error: Invalid output directory")
             return
         
+        # Show processing indicator
         self.status_var.set("Processing files...")
+        self.show_progress_indicator(True, "Processing XML files. This may take a while...")
         logger.info("Process button clicked, starting file processing")
         
+        # Start processing in a separate thread
+        processing_thread = threading.Thread(target=self._process_files_thread)
+        processing_thread.daemon = True
+        processing_thread.start()
+
+    def _process_files_thread(self):
+        """Process files in a background thread"""
         try:
             # Find all XML files in the input directory
             xml_dir = self.xml_path_var.get()
             self.xml_files = glob.glob(os.path.join(xml_dir, "*.xml"))
             
             if not self.xml_files:
-                self.status_var.set("No XML files found in the input directory")
+                self.root.after(0, lambda: self.status_var.set("No XML files found in the input directory"))
+                self.root.after(0, lambda: self.show_progress_indicator(False))
                 return
             
-            # Load reference data from XLSX file
-            self.processor.load_reference_data(self.xlsx_path_var.get())
-            
+            # Check if reference data is already loaded
             if not self.processor.reference_data:
-                self.status_var.set("No valid reference data found in XLSX file")
-                return
+                self.root.after(0, lambda: self.show_progress_indicator(True, "Loading Excel data..."))
+                try:
+                    success = self.processor.load_reference_data(self.xlsx_path_var.get())
+                    if not success:
+                        self.root.after(0, lambda: self.status_var.set("No valid reference data found in XLSX file"))
+                        self.root.after(0, lambda: self.show_progress_indicator(False))
+                        return
+                except Exception as e:
+                    self.root.after(0, lambda: self.status_var.set(f"Error loading Excel data: {str(e)}"))
+                    self.root.after(0, lambda: self.show_progress_indicator(False))
+                    return
             
             # Process XML files
             self.processed_files = []
             self.changes_made = {}
+            total_files = len(self.xml_files)
             
-            for xml_file in self.xml_files:
+            for i, xml_file in enumerate(self.xml_files):
+                # Update progress message
+                file_name = os.path.basename(xml_file)
+                progress_msg = f"Processing file {i+1} of {total_files}: {file_name}"
+                self.root.after(0, lambda msg=progress_msg: self.show_progress_indicator(True, msg))
+                
                 processed_file, changes = self.processor.process_xml_file(xml_file, self.output_path_var.get())
                 if processed_file:
                     self.processed_files.append(processed_file)
                     self.changes_made[xml_file] = changes
             
             if not self.processed_files:
-                self.status_var.set("No files were processed")
+                self.root.after(0, lambda: self.status_var.set("No files were processed"))
+                self.root.after(0, lambda: self.show_progress_indicator(False))
                 return
             
-            # Open preview window
-            preview = PreviewWindow(self.root, self.xml_files, self.processed_files, 
-                                   self.changes_made, self.backup_dir, self.output_path_var.get())
+            # Open preview window in the main thread
+            self.root.after(0, self.show_preview_window)
             
         except Exception as e:
-            self.status_var.set(f"Error: {str(e)}")
             logger.error(f"Error processing files: {str(e)}", exc_info=True)
+            self.root.after(0, lambda: self.status_var.set(f"Error: {str(e)}"))
+            self.root.after(0, lambda: self.show_progress_indicator(False))
+
+    def show_preview_window(self):
+        """Show the preview window in the main thread"""
+        self.show_progress_indicator(False)
+        preview = PreviewWindow(self.root, self.xml_files, self.processed_files, 
+                               self.changes_made, self.backup_dir, self.output_path_var.get())
+
+    def show_progress_indicator(self, show=True, message=None):
+        """Show or hide a progress indicator with optional message"""
+        if not hasattr(self, 'progress_frame'):
+            # Create progress frame if it doesn't exist
+            self.progress_frame = ttk.Frame(self.root)
+            self.progress_indicator = ttk.Progressbar(self.progress_frame, mode='indeterminate', length=300)
+            self.progress_indicator.pack(pady=5)
+            self.progress_message = ttk.Label(self.progress_frame, text="Processing...")
+            self.progress_message.pack(pady=5)
+        
+        if show:
+            if message:
+                self.progress_message.config(text=message)
+            self.progress_frame.pack(pady=10)
+            self.progress_indicator.start(10)
+        else:
+            self.progress_indicator.stop()
+            self.progress_frame.pack_forget()
 
 if __name__ == "__main__":
     root = tk.Tk()
