@@ -233,19 +233,16 @@ class XMLProcessor:
                         continue
                         
                     # Get the new date from reference data and ensure it's just the date part
-                    new_date = self.reference_data[expression]['date']
-                    # If the new date has a time component, remove it
+                    new_date = self.reference_data[expression]['date'].strip()
+                    # Remove any time component if present (e.g., "2024-03-14 00:00:00" -> "2024-03-14")
                     if ' ' in new_date:
                         new_date = new_date.split()[0]
                     
                     # Get the current startEffectiveDate and ensure we compare just the date part
-                    old_date = elem.get('startEffectiveDate')
-                    if old_date and ' ' in old_date:
-                        old_date_part = old_date.split()[0]
-                    else:
-                        old_date_part = old_date
+                    old_date = elem.get('startEffectiveDate', '').strip()
+                    old_date_part = old_date.split()[0] if ' ' in old_date else old_date
                     
-                    # Compare just the date parts
+                    # Compare just the date parts and update if different
                     if old_date_part != new_date:
                         # Set the new date (without any time component)
                         elem.set('startEffectiveDate', new_date)
