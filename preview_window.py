@@ -35,6 +35,10 @@ class PreviewWindow:
         text_frame = ttk.Frame(preview_frame)
         text_frame.pack(fill=tk.BOTH, expand=True)
         
+        # Create a common horizontal scrollbar at the bottom
+        h_scrollbar = ttk.Scrollbar(text_frame, orient=tk.HORIZONTAL)
+        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        
         # Original XML preview
         original_frame = ttk.LabelFrame(text_frame, text="Original XML")
         original_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
@@ -42,14 +46,10 @@ class PreviewWindow:
         self.original_text = tk.Text(original_frame, wrap=tk.NONE, width=50, height=20)
         self.original_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Add scrollbars for original text
+        # Add vertical scrollbar for original text (synchronized)
         original_y_scroll = ttk.Scrollbar(original_frame, orient=tk.VERTICAL, command=self.sync_scroll_y)
         original_y_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.original_text.config(yscrollcommand=original_y_scroll.set)
-        
-        original_x_scroll = ttk.Scrollbar(text_frame, orient=tk.HORIZONTAL, command=self.original_text.xview)
-        original_x_scroll.pack(side=tk.BOTTOM, fill=tk.X, before=original_frame)
-        self.original_text.config(xscrollcommand=original_x_scroll.set)
+        self.original_text.config(yscrollcommand=self.sync_scrollbar_y)
         
         # Modified XML preview
         modified_frame = ttk.LabelFrame(text_frame, text="Modified XML")
@@ -58,14 +58,21 @@ class PreviewWindow:
         self.modified_text = tk.Text(modified_frame, wrap=tk.NONE, width=50, height=20)
         self.modified_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Add scrollbars for modified text
+        # Add vertical scrollbar for modified text (synchronized)
         modified_y_scroll = ttk.Scrollbar(modified_frame, orient=tk.VERTICAL, command=self.sync_scroll_y)
         modified_y_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.modified_text.config(yscrollcommand=modified_y_scroll.set)
+        self.modified_text.config(yscrollcommand=self.sync_scrollbar_y)
         
-        modified_x_scroll = ttk.Scrollbar(text_frame, orient=tk.HORIZONTAL, command=self.modified_text.xview)
-        modified_x_scroll.pack(side=tk.BOTTOM, fill=tk.X, before=modified_frame)
-        self.modified_text.config(xscrollcommand=modified_x_scroll.set)
+        # Configure horizontal scrollbar to control both text widgets
+        h_scrollbar.config(command=self.sync_scroll_x)
+        self.original_text.config(xscrollcommand=self.sync_scrollbar_x)
+        self.modified_text.config(xscrollcommand=self.sync_scrollbar_x)
+        
+        # Bind additional events for better synchronization
+        self.original_text.bind("<KeyRelease>", self.sync_from_original)
+        self.modified_text.bind("<KeyRelease>", self.sync_from_modified)
+        self.original_text.bind("<Button-1>", self.sync_from_original)
+        self.modified_text.bind("<Button-1>", self.sync_from_modified)
         
         # Add pagination controls
         pagination_frame = ttk.Frame(preview_frame)
@@ -87,10 +94,37 @@ class PreviewWindow:
         # Load the first file
         self.load_file_preview()
     
+    def sync_scrollbar_x(self, *args):
+        """Update both text widgets and scrollbar when one is scrolled horizontally"""
+        self.original_text.xview_moveto(args[0])
+        self.modified_text.xview_moveto(args[0])
+        return args
+    
+    def sync_scrollbar_y(self, *args):
+        """Update both text widgets when one is scrolled vertically"""
+        self.original_text.yview_moveto(args[0])
+        self.modified_text.yview_moveto(args[0])
+        return args
+    
+    def sync_scroll_x(self, *args):
+        """Synchronize horizontal scrolling between the two text widgets"""
+        self.original_text.xview(*args)
+        self.modified_text.xview(*args)
+    
     def sync_scroll_y(self, *args):
         """Synchronize vertical scrolling between the two text widgets"""
         self.original_text.yview(*args)
         self.modified_text.yview(*args)
+    
+    def sync_from_original(self, event=None):
+        """Synchronize modified text to match original text position"""
+        self.modified_text.yview_moveto(self.original_text.yview()[0])
+        self.modified_text.xview_moveto(self.original_text.xview()[0])
+    
+    def sync_from_modified(self, event=None):
+        """Synchronize original text to match modified text position"""
+        self.original_text.yview_moveto(self.modified_text.yview()[0])
+        self.original_text.xview_moveto(self.modified_text.xview()[0])
     
     def load_file_preview(self):
         """Load the current file into the preview"""
@@ -129,39 +163,98 @@ class PreviewWindow:
     
     def highlight_file_changes(self, original_file):
         """Highlight the changes in the current file"""
-        # Configure tags for highlighting
-        self.original_text.tag_configure("change", background="lightgreen")
-        self.modified_text.tag_configure("change", background="yellow")
-        
-        # Get changes for this file
-        changes = self.changes_made.get(original_file, [])
-        
-        for change in changes:
-            # Find the locations of the changes in both files
-            original_pattern = f'startEffectiveDate="{change["old_value"]}"'
-            modified_pattern = f'startEffectiveDate="{change["new_value"]}"'
+        try:
+            # Configure tags for highlighting
+            self.original_text.tag_configure("change", background="lightgreen")
+            self.modified_text.tag_configure("change", background="yellow")
+            self.original_text.tag_configure("line", background="#f0f0f0")  # Light gray for changed lines
+            self.modified_text.tag_configure("line", background="#f0f0f0")  # Light gray for changed lines
             
-            # Search in original text
-            start_pos = "1.0"
-            while True:
-                start_pos = self.original_text.search(original_pattern, start_pos, tk.END)
-                if not start_pos:
-                    break
-                    
-                end_pos = f"{start_pos}+{len(original_pattern)}c"
-                self.original_text.tag_add("change", start_pos, end_pos)
-                start_pos = end_pos
+            # Get changes for this file
+            changes = self.changes_made.get(original_file, [])
             
-            # Search in modified text
-            start_pos = "1.0"
-            while True:
-                start_pos = self.modified_text.search(modified_pattern, start_pos, tk.END)
-                if not start_pos:
-                    break
+            for change in changes:
+                # Find the locations of the changes in both files
+                original_pattern = f'startEffectiveDate="{change["old_value"]}"'
+                modified_pattern = f'startEffectiveDate="{change["new_value"]}"'
+                expression_pattern = f'expression="{change["expression"]}"'
+                
+                # Search in original text
+                start_pos = "1.0"
+                while True:
+                    # Find the expression
+                    expr_pos = self.original_text.search(expression_pattern, start_pos, tk.END)
+                    if not expr_pos:
+                        break
                     
-                end_pos = f"{start_pos}+{len(modified_pattern)}c"
-                self.modified_text.tag_add("change", start_pos, end_pos)
-                start_pos = end_pos
+                    # Get the line number
+                    line_num = self.original_text.index(expr_pos).split('.')[0]
+                    
+                    # Highlight the whole line
+                    line_start = f"{line_num}.0"
+                    line_end = f"{line_num}.end"
+                    self.original_text.tag_add("line", line_start, line_end)
+                    
+                    # Next, find the date pattern near this line
+                    search_start = line_start
+                    search_end = f"{int(line_num) + 5}.end"  # Look a few lines ahead
+                    
+                    try:
+                        # Search for the date attribute
+                        date_pos = self.original_text.search(original_pattern, search_start, search_end)
+                        if date_pos:
+                            # Highlight the specific date
+                            date_end = f"{date_pos}+{len(original_pattern)}c"
+                            self.original_text.tag_add("change", date_pos, date_end)
+                            
+                            # Also highlight the line containing the date
+                            date_line = self.original_text.index(date_pos).split('.')[0]
+                            self.original_text.tag_add("line", f"{date_line}.0", f"{date_line}.end")
+                    except Exception as e:
+                        logger.error(f"Error highlighting original text: {e}")
+                    
+                    # Move to next occurrence
+                    start_pos = f"{expr_pos}+{len(expression_pattern)}c"
+                
+                # Search in modified text
+                start_pos = "1.0"
+                while True:
+                    # Find the expression
+                    expr_pos = self.modified_text.search(expression_pattern, start_pos, tk.END)
+                    if not expr_pos:
+                        break
+                    
+                    # Get the line number
+                    line_num = self.modified_text.index(expr_pos).split('.')[0]
+                    
+                    # Highlight the whole line
+                    line_start = f"{line_num}.0"
+                    line_end = f"{line_num}.end"
+                    self.modified_text.tag_add("line", line_start, line_end)
+                    
+                    # Next, find the date pattern near this line
+                    search_start = line_start
+                    search_end = f"{int(line_num) + 5}.end"  # Look a few lines ahead
+                    
+                    try:
+                        # Search for the date attribute
+                        date_pos = self.modified_text.search(modified_pattern, search_start, search_end)
+                        if date_pos:
+                            # Highlight the specific date
+                            date_end = f"{date_pos}+{len(modified_pattern)}c"
+                            self.modified_text.tag_add("change", date_pos, date_end)
+                            
+                            # Also highlight the line containing the date
+                            date_line = self.modified_text.index(date_pos).split('.')[0]
+                            self.modified_text.tag_add("line", f"{date_line}.0", f"{date_line}.end")
+                    except Exception as e:
+                        logger.error(f"Error highlighting modified text: {e}")
+                    
+                    # Move to next occurrence
+                    start_pos = f"{expr_pos}+{len(expression_pattern)}c"
+        
+        except Exception as e:
+            logger.error(f"Error in highlight_file_changes: {str(e)}", exc_info=True)
     
     def prev_file(self):
         """Show the previous file in the preview"""
@@ -210,7 +303,8 @@ class PreviewWindow:
                 
                 for change in self.changes_made[original_file]:
                     history_text.insert(tk.END, f"  Expression: {change['expression']}\n")
-                    history_text.insert(tk.END, f"  Changed {change['attribute']} from '{change['old_value']}' to '{change['new_value']}'\n\n")
+                    history_text.insert(tk.END, f"  Changed {change['attribute']} from '{change['old_value']}' to '{change['new_value']}'\n")
+                    history_text.insert(tk.END, f"  (Based on match with BaseFilename: {file_name})\n\n")
                     total_changes += 1
         
         # Add a summary at the top

@@ -69,8 +69,11 @@ class XMLProcessorApp:
         self.output_status_label.grid(row=8, column=0, sticky=tk.W)
         
         # Process button
-        process_button = ttk.Button(main_frame, text="Process", command=self.process_files)
-        process_button.grid(row=9, column=0, columnspan=2, pady=(20, 10))
+        self.process_button = ttk.Button(main_frame, text="Process", command=self.process_files)
+        self.process_button.grid(row=9, column=0, columnspan=2, pady=(20, 10))
+        
+        # Loading state
+        self.is_loading_xlsx = False
         
         # Status label
         self.status_var = tk.StringVar()
@@ -108,8 +111,12 @@ class XMLProcessorApp:
             self.xlsx_status_var.set("Loading Excel data...")
             self.xlsx_status_label.configure(foreground="blue")
             
-            # Show loading indicator
-            self.show_progress_indicator(True)
+            # Disable process button during loading
+            self.is_loading_xlsx = True
+            self.process_button.configure(state="disabled")
+            
+            # Show loading indicator with specific message
+            self.show_progress_indicator(True, "Loading and parsing Excel data...")
             
             # Start loading in a separate thread
             loading_thread = threading.Thread(target=self._load_xlsx_thread, args=(xlsx_file,))
@@ -138,6 +145,9 @@ class XMLProcessorApp:
             self.root.after(0, lambda: self.xlsx_status_label.configure(foreground="red"))
             logger.error(f"Error loading XLSX file {xlsx_file}: {error_msg}", exc_info=True)
         finally:
+            # Re-enable process button and update loading state
+            self.root.after(0, lambda: self.process_button.configure(state="normal"))
+            self.root.after(0, lambda: setattr(self, 'is_loading_xlsx', False))
             self.root.after(0, lambda: self.show_progress_indicator(False))
     
     def browse_output_dir(self):
@@ -153,6 +163,14 @@ class XMLProcessorApp:
 
     def verify_paths(self):
         """Verify each path and update status labels"""
+        # Don't verify paths if we're currently loading XLSX
+        if self.is_loading_xlsx:
+            return
+
+        xml_valid = False
+        output_valid = False
+        xlsx_valid = False
+
         # Verify XML directory
         if self.xml_path_var.get():
             if os.path.isdir(self.xml_path_var.get()):
@@ -160,6 +178,7 @@ class XMLProcessorApp:
                 if xml_files:
                     self.xml_status_var.set(f"✓ Found {len(xml_files)} XML files")
                     self.xml_status_label.configure(foreground="green")
+                    xml_valid = True
                 else:
                     self.xml_status_var.set("✗ No XML files found")
                     self.xml_status_label.configure(foreground="red")
@@ -170,38 +189,35 @@ class XMLProcessorApp:
             self.xml_status_var.set("")
             self.xml_status_label.configure(foreground="black")
         
-        # Verify XLSX file
+        # Verify XLSX file - only check if file exists and has correct extension
         if self.xlsx_path_var.get():
             if os.path.isfile(self.xlsx_path_var.get()) and self.xlsx_path_var.get().lower().endswith('.xlsx'):
-                # Try to load reference data to verify
-                try:
-                    reference_data = self.processor.load_reference_data(self.xlsx_path_var.get())
-                    if reference_data:
-                        self.xlsx_status_var.set(f"✓ Found {len(reference_data)} reference entries")
-                        self.xlsx_status_label.configure(foreground="green")
-                    else:
-                        self.xlsx_status_var.set("✗ No valid reference data found")
-                        self.xlsx_status_label.configure(foreground="red")
-                except Exception as e:
-                    self.xlsx_status_var.set(f"✗ Error reading XLSX: {str(e)[:30]}...")
-                    self.xlsx_status_label.configure(foreground="red")
+                xlsx_valid = True
             else:
                 self.xlsx_status_var.set("✗ Invalid XLSX file")
                 self.xlsx_status_label.configure(foreground="red")
         else:
             self.xlsx_status_var.set("")
+            self.xlsx_status_label.configure(foreground="black")
         
         # Verify output directory
         if self.output_path_var.get():
             if os.path.isdir(self.output_path_var.get()):
                 self.output_status_var.set("✓ Valid output directory")
                 self.output_status_label.configure(foreground="green")
+                output_valid = True
             else:
                 self.output_status_var.set("✗ Invalid directory")
                 self.output_status_label.configure(foreground="red")
         else:
             self.output_status_var.set("")
             self.output_status_label.configure(foreground="black")
+
+        # Enable/disable process button based on all validations
+        if xml_valid and xlsx_valid and output_valid and not self.is_loading_xlsx:
+            self.process_button.configure(state="normal")
+        else:
+            self.process_button.configure(state="disabled")
     
     def process_files(self):
         # Validate inputs
@@ -295,7 +311,7 @@ class XMLProcessorApp:
             self.progress_frame = ttk.Frame(self.root)
             self.progress_indicator = ttk.Progressbar(self.progress_frame, mode='indeterminate', length=300)
             self.progress_indicator.pack(pady=5)
-            self.progress_message = ttk.Label(self.progress_frame, text="Processing...")
+            self.progress_message = ttk.Label(self.progress_frame, text="", wraplength=300)
             self.progress_message.pack(pady=5)
         
         if show:
@@ -303,9 +319,11 @@ class XMLProcessorApp:
                 self.progress_message.config(text=message)
             self.progress_frame.pack(pady=10)
             self.progress_indicator.start(10)
+            self.root.update_idletasks()  # Force UI update
         else:
             self.progress_indicator.stop()
             self.progress_frame.pack_forget()
+            self.root.update_idletasks()  # Force UI update
 
 if __name__ == "__main__":
     root = tk.Tk()
