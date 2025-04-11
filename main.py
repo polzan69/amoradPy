@@ -19,7 +19,6 @@ class XMLProcessorApp:
         self.root.title("XML Processor")
         self.root.geometry("500x350")
         
-        # Create processor
         self.processor = XMLProcessor()
         
         # Create main frame
