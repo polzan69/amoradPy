@@ -18,7 +18,7 @@ class PreviewWindow:
         # Create preview window
         self.window = Toplevel(parent)
         self.window.title("Preview Changes")
-        self.window.geometry("1000x600")
+        self.window.geometry("1200x600")
         
         # Create a frame for the preview content
         preview_frame = ttk.Frame(self.window, padding="10")
@@ -27,9 +27,6 @@ class PreviewWindow:
         # Add a header
         header_frame = ttk.Frame(preview_frame)
         header_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Label(header_frame, text="ORIGINAL PREVIEW", font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=(0, 200))
-        ttk.Label(header_frame, text="OUTPUT PREVIEW", font=("Arial", 10, "bold")).pack(side=tk.LEFT)
         
         # Create a frame for the text areas
         text_frame = ttk.Frame(preview_frame)

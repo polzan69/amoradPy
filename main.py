@@ -17,7 +17,7 @@ class XMLProcessorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("XML Processor")
-        self.root.geometry("600x400")
+        self.root.geometry("500x350")
         
         # Create processor
         self.processor = XMLProcessor()
@@ -319,11 +319,11 @@ class XMLProcessorApp:
                 self.progress_message.config(text=message)
             self.progress_frame.pack(pady=10)
             self.progress_indicator.start(10)
-            self.root.update_idletasks()  # Force UI update
+            self.root.update_idletasks() 
         else:
             self.progress_indicator.stop()
             self.progress_frame.pack_forget()
-            self.root.update_idletasks()  # Force UI update
+            self.root.update_idletasks()
 
 if __name__ == "__main__":
     root = tk.Tk()
