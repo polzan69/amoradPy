@@ -6,6 +6,16 @@ import tempfile
 from logger import logger
 from datetime import datetime
 
+# Optional faster XML backend (lxml)
+try:
+    from lxml import etree as LET
+    USE_LXML = True
+    logger.info("lxml detected: fast XML parsing enabled")
+except Exception:
+    LET = None
+    USE_LXML = False
+    logger.info("lxml not available: using built-in xml.etree")
+
 class XMLProcessor:
     def __init__(self):
         self.reference_data = {}
@@ -215,9 +225,14 @@ class XMLProcessor:
             # Get the base filename without path
             xml_base_filename = os.path.basename(xml_file)
             
-            # Parse the XML file
-            tree = ET.parse(xml_file)
-            root = tree.getroot()
+            # Parse the XML file (use lxml if available for speed)
+            if USE_LXML:
+                parser = LET.XMLParser(huge_tree=True, remove_blank_text=False)
+                tree = LET.parse(xml_file, parser)
+                root = tree.getroot()
+            else:
+                tree = ET.parse(xml_file)
+                root = tree.getroot()
             
             # Track changes
             changes = []
@@ -266,7 +281,10 @@ class XMLProcessor:
             os.close(fd)
             
             # Write the modified XML to the temporary file
-            tree.write(temp_file, encoding='utf-8', xml_declaration=True)
+            if USE_LXML:
+                tree.write(temp_file, encoding='utf-8', xml_declaration=True)
+            else:
+                tree.write(temp_file, encoding='utf-8', xml_declaration=True)
             
             logger.info(f"Processed {xml_file} with {len(changes)} changes")
             return temp_file, changes

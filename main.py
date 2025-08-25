@@ -10,7 +10,6 @@ import shutil
 import glob
 from logger import logger
 from xml_processor import XMLProcessor
-from preview_window import PreviewWindow
 import threading
 
 class XMLProcessorApp:
@@ -24,6 +23,14 @@ class XMLProcessorApp:
         # Create main frame
         main_frame = ttk.Frame(root, padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
+        # Keep a reference to main_frame (used by grid-based layout above)
+        self.main_frame = main_frame
+
+        # Internal state for progress/status animation
+        self._anim_running = False
+        self._anim_step = 0
+        # Keep a reference for placing progress UI consistently
+        self.main_frame = main_frame
         
         # Input paths section
         ttk.Label(main_frame, text="XML Files Directory", font=("Arial", 10)).grid(row=0, column=0, sticky=tk.W, pady=(10, 5))
@@ -289,40 +296,74 @@ class XMLProcessorApp:
                 self.root.after(0, lambda: self.show_progress_indicator(False))
                 return
             
-            # Open preview window in the main thread
-            self.root.after(0, self.show_preview_window)
+            # Apply changes immediately when processing is done
+            try:
+                success, message = self.processor.apply_changes(
+                    self.xml_files,
+                    self.processed_files,
+                    self.changes_made,
+                    self.backup_dir,
+                    self.output_path_var.get()
+                )
+                if success:
+                    self.root.after(0, lambda: messagebox.showinfo("Success", message))
+                    self.root.after(0, lambda: self.status_var.set("Processing completed successfully"))
+                else:
+                    self.root.after(0, lambda: messagebox.showerror("Error", message))
+                    self.root.after(0, lambda: self.status_var.set("Processing completed with errors"))
+            finally:
+                self.root.after(0, lambda: self.show_progress_indicator(False))
             
         except Exception as e:
             logger.error(f"Error processing files: {str(e)}", exc_info=True)
             self.root.after(0, lambda: self.status_var.set(f"Error: {str(e)}"))
             self.root.after(0, lambda: self.show_progress_indicator(False))
 
+ 
     def show_preview_window(self):
-        """Show the preview window in the main thread"""
-        self.show_progress_indicator(False)
-        preview = PreviewWindow(self.root, self.xml_files, self.processed_files, 
-                               self.changes_made, self.backup_dir, self.output_path_var.get())
+        # Preview removed; keep stub to avoid NameError/AttributeError
+        pass
 
     def show_progress_indicator(self, show=True, message=None):
         """Show or hide a progress indicator with optional message"""
         if not hasattr(self, 'progress_frame'):
-            # Create progress frame if it doesn't exist
+            # IMPORTANT: mount on root (packed) to avoid mixing grid/pack in main_frame
             self.progress_frame = ttk.Frame(self.root)
-            self.progress_indicator = ttk.Progressbar(self.progress_frame, mode='indeterminate', length=300)
-            self.progress_indicator.pack(pady=5)
-            self.progress_message = ttk.Label(self.progress_frame, text="", wraplength=300)
-            self.progress_message.pack(pady=5)
+            self.progress_indicator = ttk.Progressbar(self.progress_frame, mode='indeterminate', length=360)
+            self.progress_indicator.pack(pady=5, fill=tk.X)
+            self.progress_message = ttk.Label(self.progress_frame, text="", wraplength=360, anchor='w', justify='left')
+            self.progress_message.pack(pady=5, fill=tk.X)
         
         if show:
             if message:
                 self.progress_message.config(text=message)
-            self.progress_frame.pack(pady=10)
+            self.progress_frame.pack(side=tk.BOTTOM, pady=10, fill=tk.X)
             self.progress_indicator.start(10)
             self.root.update_idletasks() 
+            # Start fallback status animation (cycling dots)
+            if not self._anim_running:
+                self._anim_running = True
+                self._animate_status()
         else:
             self.progress_indicator.stop()
             self.progress_frame.pack_forget()
             self.root.update_idletasks()
+            # Stop fallback animation
+            self._anim_running = False
+            self._anim_step = 0
+
+    def _animate_status(self):
+        """Fallback animation: append cycling dots to the status message while running."""
+        if not self._anim_running:
+            return
+        base = self.progress_message.cget('text')
+        # strip existing dots at end
+        base = base.rstrip('. ')
+        self._anim_step = (self._anim_step + 1) % 4
+        dots = '.' * self._anim_step
+        self.progress_message.config(text=f"{base}{(' ' if base else '')}{dots}")
+        # schedule next frame
+        self.root.after(300, self._animate_status)
 
 if __name__ == "__main__":
     root = tk.Tk()
